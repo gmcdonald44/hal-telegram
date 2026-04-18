@@ -18,7 +18,7 @@ Not a framework. No database, no web UI, no plugin system. If you want memory / 
 
 I built it because my "Claude Code as everyday assistant" workflow only works when I can reach it from my phone. Six weeks of dogfooding, now open-sourcing the bridge.
 
-GitHub: <link>
+GitHub: https://github.com/gmcdonald44/hal-telegram
 
 Happy to answer questions on the architecture, trade-offs, or how it compares to Claude Code Routines (TL;DR: Routines are stateless and server-managed; this is stateful and runs on your box).
 
@@ -44,7 +44,7 @@ Progress ticker edits a single Telegram message every 10s with the current tool 
 
 Single-owner mode by default. MIT licensed. PRs welcome but the scope stays narrow.
 
-<link>
+https://github.com/gmcdonald44/hal-telegram
 
 ---
 
@@ -54,7 +54,7 @@ Single-owner mode by default. MIT licensed. PRs welcome but the scope stays narr
 
 `bun install && bun run bot` — message your bot, it replies with Claude Code. Each chat = persistent `claude -p --resume` session.
 
-<link>
+https://github.com/gmcdonald44/hal-telegram
 
 2/ Four TypeScript files, no database, no framework. The whole repo is ~800 lines.
 
@@ -66,15 +66,16 @@ Single-owner mode by default. MIT licensed. PRs welcome but the scope stays narr
 
 MIT. PRs welcome but the scope stays narrow.
 
-<link>
+https://github.com/gmcdonald44/hal-telegram
 
 ---
 
 ## Launch checklist
 
-- [ ] Pick GitHub account (4 options in .env: hal-test, shiplog, grant-workspace, grant-gbstudio)
-- [ ] Create the repo, push the `main` branch
-- [ ] Replace `<link>` in whichever variant you pick
+- [x] Pick GitHub account → `gmcdonald44` (personal primary)
+- [x] Create the repo, push the `main` branch → https://github.com/gmcdonald44/hal-telegram
+- [ ] Pick a variant (A / B / C) and adjust the "I" voice to yours
+- [ ] Add repo topics on GitHub (`telegram-bot`, `claude-code`, `grammy`, `bun`, `typescript`)
 - [ ] First pin on HN is the Show HN post; aim for 9–11am ET for best visibility
 - [ ] Have a follow-up answer ready for "why not just use [grammy/telegram-bot-api/other wrapper]?" → you're not wrapping Telegram, you're bridging Telegram → Claude Code CLI with session persistence
 - [ ] Have a follow-up ready for "this is unsafe, `--dangerously-skip-permissions`" → the whole bot runs in one working directory you chose, and the README is explicit about that
