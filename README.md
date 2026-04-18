@@ -93,13 +93,38 @@ Four files. ~800 lines total. Read them.
 - **[Bun](https://bun.sh)** — runs the TypeScript directly. `curl -fsSL https://bun.sh/install | bash`
 - **[Claude Code](https://docs.claude.com/claude-code) CLI** on your `PATH` — `claude --version` should work
 - An Anthropic API key OR a Claude subscription that lets `claude -p` run
-- A Telegram bot token (free, 2 minutes to get — see [SETUP.md](docs/SETUP.md))
+- A Telegram bot token (free, 2 minutes to get — see below)
+
+---
+
+## Getting a Telegram bot token (@BotFather)
+
+Free, no phone verification beyond your existing Telegram account, ~2 minutes.
+
+1. Open Telegram and message **[@BotFather](https://t.me/BotFather)**.
+2. Send `/newbot` — follow the prompts:
+   - **Display name:** whatever you want (shown as the bot's name in chats)
+   - **Username:** must be unique across Telegram and must end in `bot` (e.g. `my_claude_code_bot`)
+3. BotFather replies with an HTTP API token that looks like `1234567890:AAHxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`. **This is your `TELEGRAM_BOT_TOKEN`.** Treat it like a password — anyone with it can impersonate your bot.
+4. Get your numeric user ID for single-owner mode: message **[@userinfobot](https://t.me/userinfobot)** → tap start → copy the ID it replies with. **This is your `TELEGRAM_OWNER_CHAT_ID`.**
+5. (Optional polish) Back in @BotFather, register the slash commands so Telegram shows autocomplete when users type `/`:
+   - Send `/setcommands` → pick your bot → paste:
+     ```
+     stop - Kill the active Claude Code spawn
+     queue - Show what's running and what's pending
+     rotate - Start a fresh Claude Code session
+     ```
+6. (Optional) `/setdescription` and `/setabouttext` let you set the text that appears on your bot's profile page.
+
+If you later want to use the bot in a group chat, also send `/setprivacy` → pick your bot → **Disable**, so the bot can see all messages (not just ones addressed to it).
+
+> **Losing the token:** `/token` in @BotFather will reveal it again. `/revoke` rotates it — the old token stops working immediately.
 
 ---
 
 ## Setup
 
-See **[docs/SETUP.md](docs/SETUP.md)** for the 5-minute walkthrough: creating the bot with @BotFather, finding your chat ID, filling in `.env`, first message.
+See **[docs/SETUP.md](docs/SETUP.md)** for the full 5-minute walkthrough: filling in `.env`, first message, always-on runners (systemd / launchd), pointing Claude at a different codebase.
 
 Hitting errors? See **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)**.
 
