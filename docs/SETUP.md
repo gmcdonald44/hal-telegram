@@ -45,7 +45,7 @@ The bot locks itself to a single owner by default. You need your numeric user ID
 ## 4. Clone and configure
 
 ```bash
-git clone https://github.com/<you>/hal-telegram
+git clone https://github.com/gmcdonald44/hal-telegram
 cd hal-telegram
 bun install
 cp .env.example .env

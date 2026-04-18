@@ -5,7 +5,7 @@
 A single-binary Telegram bridge for [Claude Code](https://docs.claude.com/claude-code). Spawns `claude -p` per inbound message, streams the response back as chat messages, survives crashes, works on your phone.
 
 ```bash
-git clone https://github.com/<you>/hal-telegram
+git clone https://github.com/gmcdonald44/hal-telegram
 cd hal-telegram
 bun install
 cp .env.example .env     # fill in TELEGRAM_BOT_TOKEN + TELEGRAM_OWNER_CHAT_ID
