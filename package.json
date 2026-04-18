@@ -1,0 +1,26 @@
+{
+  "name": "hal-telegram",
+  "version": "0.1.0",
+  "description": "Telegram bridge for Claude Code — spawn claude -p per message, stream the reply back.",
+  "module": "bot/index.ts",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "bot": "bun run bot/index.ts",
+    "start": "bun run bot/index.ts",
+    "dev": "bun --watch run bot/index.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "grammy": "^1.42.0"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  }
+}

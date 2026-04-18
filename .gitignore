@@ -1,0 +1,17 @@
+node_modules/
+bun.lockb
+.env
+.env.local
+.DS_Store
+
+# Channel registry — contains your chat IDs, never commit
+bot/channel-registry-prod.json
+bot/channel-registry-sandbox.json
+
+# Claude Code local state
+.claude/sessions/
+.claude/history.jsonl
+
+# Logs
+logs/
+*.log
