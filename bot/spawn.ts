@@ -35,6 +35,8 @@ export interface SpawnResult {
   elapsedMs: number;
   ok: boolean;
   exitCode: number;
+  /** Termination signal if the process was killed (SIGTERM/SIGKILL from /stop); null otherwise */
+  signal: NodeJS.Signals | null;
   stderr: string;
 }
 
@@ -141,7 +143,7 @@ export async function spawnClaude(
       stderr += chunk.toString();
     });
 
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       const elapsed = Date.now() - start;
       resolve({
         text: responseText.trim(),
@@ -149,6 +151,7 @@ export async function spawnClaude(
         elapsedMs: elapsed,
         ok: code === 0,
         exitCode: code ?? 1,
+        signal: signal ?? null,
         stderr: stderr.trim(),
       });
     });
@@ -161,6 +164,7 @@ export async function spawnClaude(
         elapsedMs: elapsed,
         ok: false,
         exitCode: 1,
+        signal: null,
         stderr: err.message,
       });
     });

@@ -241,13 +241,13 @@ bot.on("message:text", async (ctx) => {
           await sendReply(ctx, result.text.slice(4000));
         }
         // Crashes (not a user interrupt) should surface even when we have text
-        if (result.exitCode !== 0 && result.exitCode !== 143 && result.exitCode !== 137) {
+        if (result.exitCode !== 0 && result.signal !== "SIGTERM" && result.signal !== "SIGKILL") {
           console.error(`[ERROR] exit=${result.exitCode}, stderr=${result.stderr.slice(0, 200)}`);
           await ctx.reply(`⚠️ Run exited with code ${result.exitCode} — output above may be incomplete.`);
         }
       } else {
         await tracker.cleanup();
-        if (result.exitCode !== 0 && result.exitCode !== 143 && result.exitCode !== 137) {
+        if (result.exitCode !== 0 && result.signal !== "SIGTERM" && result.signal !== "SIGKILL") {
           console.error(`[ERROR] exit=${result.exitCode}, stderr=${result.stderr.slice(0, 200)}`);
           await ctx.reply("Hit an error. Check the logs.");
         }
@@ -351,13 +351,13 @@ bot.on("message:photo", async (ctx) => {
         } else if (result.text.length > 4000) {
           await sendReply(ctx, result.text.slice(4000));
         }
-        if (result.exitCode !== 0 && result.exitCode !== 143 && result.exitCode !== 137) {
+        if (result.exitCode !== 0 && result.signal !== "SIGTERM" && result.signal !== "SIGKILL") {
           console.error(`[ERROR] exit=${result.exitCode}, stderr=${result.stderr.slice(0, 200)}`);
           await ctx.reply(`⚠️ Run exited with code ${result.exitCode} — output above may be incomplete.`);
         }
       } else {
         await tracker.cleanup();
-        if (result.exitCode !== 0 && result.exitCode !== 143 && result.exitCode !== 137) {
+        if (result.exitCode !== 0 && result.signal !== "SIGTERM" && result.signal !== "SIGKILL") {
           console.error(`[ERROR] exit=${result.exitCode}, stderr=${result.stderr.slice(0, 200)}`);
           await ctx.reply("Hit an error processing the photo.");
         }
@@ -464,13 +464,13 @@ bot.on("message:document", async (ctx) => {
         } else if (result.text.length > 4000) {
           await sendReply(ctx, result.text.slice(4000));
         }
-        if (result.exitCode !== 0 && result.exitCode !== 143 && result.exitCode !== 137) {
+        if (result.exitCode !== 0 && result.signal !== "SIGTERM" && result.signal !== "SIGKILL") {
           console.error(`[ERROR] exit=${result.exitCode}, stderr=${result.stderr.slice(0, 200)}`);
           await ctx.reply(`⚠️ Run exited with code ${result.exitCode} — output above may be incomplete.`);
         }
       } else {
         await tracker.cleanup();
-        if (result.exitCode !== 0 && result.exitCode !== 143 && result.exitCode !== 137) {
+        if (result.exitCode !== 0 && result.signal !== "SIGTERM" && result.signal !== "SIGKILL") {
           console.error(`[ERROR] exit=${result.exitCode}, stderr=${result.stderr.slice(0, 200)}`);
           await ctx.reply("Hit an error processing the file.");
         }
@@ -502,16 +502,19 @@ class ProgressTracker {
   private lastEditTime: number = 0;
   private finalized: boolean = false;
   private initialTimer: ReturnType<typeof setTimeout> | null = null;
+  private throttleTimer: ReturnType<typeof setTimeout> | null = null;
+  private tickTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(ctx: Context) {
     this.ctx = ctx;
   }
 
-  /** Call from onOutput — receives accumulated response text */
+  /** Call from onOutput — receives accumulated response text.
+   *  Stream invariant: Claude emits `tool_start` then text deltas, never
+   *  interleaves text mid-tool — so new text = prior tool finished. */
   onOutput(fullText: string) {
     if (fullText !== this.responseText) {
       this.responseText = fullText;
-      // New assistant text means any prior tool call has finished — drop the label
       this.currentTool = "";
       this.throttledEdit();
     }
@@ -528,7 +531,7 @@ class ProgressTracker {
     }
   }
 
-  /** Start — initial progress message appears at 3s if no text has arrived yet */
+  /** Start — initial progress message at 3s; periodic elapsed-time refresh while idle */
   start() {
     this.startTime = Date.now();
     this.initialTimer = setTimeout(() => {
@@ -536,10 +539,20 @@ class ProgressTracker {
         this.editMessage();
       }
     }, 3_000);
+    // Keep the elapsed counter moving when no text/tool events arrive — so the
+    // user can distinguish "still running" from "stalled". Only refreshes while
+    // we're still in the ⏳ Working state; once text starts streaming, real
+    // events drive updates.
+    this.tickTimer = setInterval(() => {
+      if (this.finalized) return;
+      if (this.responseText.length === 0) this.throttledEdit();
+    }, 10_000);
   }
 
   stop() {
     if (this.initialTimer) { clearTimeout(this.initialTimer); this.initialTimer = null; }
+    if (this.throttleTimer) { clearTimeout(this.throttleTimer); this.throttleTimer = null; }
+    if (this.tickTimer) { clearInterval(this.tickTimer); this.tickTimer = null; }
   }
 
   /** Edit progress message into final response (tool line dropped = done signal) */
@@ -585,12 +598,20 @@ class ProgressTracker {
     }
   }
 
-  /** Throttled edit — max once per second */
+  /** Throttled edit — max once per second. If an event arrives inside the
+   *  throttle window, schedule a trailing edit so we never silently drop
+   *  updates (e.g. a `tool_start` that lands 200ms after the last edit). */
   private throttledEdit() {
     if (this.finalized) return;
-    const now = Date.now();
-    if (now - this.lastEditTime < 1_000) return;
-    this.editMessage();
+    const elapsed = Date.now() - this.lastEditTime;
+    if (elapsed >= 1_000) {
+      this.editMessage();
+    } else if (!this.throttleTimer) {
+      this.throttleTimer = setTimeout(() => {
+        this.throttleTimer = null;
+        if (!this.finalized) this.editMessage();
+      }, 1_000 - elapsed);
+    }
   }
 
   private async editMessage() {
