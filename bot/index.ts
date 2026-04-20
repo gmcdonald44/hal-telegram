@@ -501,7 +501,8 @@ class ProgressTracker {
   private startTime: number = Date.now();
   private lastEditTime: number = 0;
   private finalized: boolean = false;
-  private editInFlight: boolean = false;
+  private editInFlight: Promise<void> | null = null;
+  private wantEdit: boolean = false;
   private initialTimer: ReturnType<typeof setTimeout> | null = null;
   private throttleTimer: ReturnType<typeof setTimeout> | null = null;
   private tickTimer: ReturnType<typeof setInterval> | null = null;
@@ -562,6 +563,13 @@ class ProgressTracker {
     this.finalized = true;
     this.stop();
 
+    // Wait for any in-flight progress edit to land first — otherwise a slow
+    // Telegram request could complete after our final edit and overwrite the
+    // finished answer with stale "working" text.
+    if (this.editInFlight) {
+      try { await this.editInFlight; } catch {}
+    }
+
     const msgId = this.msgId;
     if (msgId === null) return false;
 
@@ -615,49 +623,51 @@ class ProgressTracker {
     }
   }
 
-  private async editMessage() {
+  private editMessage() {
     if (this.finalized) return;
-    // Serialize Telegram writes. An in-flight edit may overlap with a new one
-    // if onOutput/onEvent fires while we're awaiting the API round-trip —
-    // bail and let the next throttledEdit (or a trailing timer) catch up.
-    if (this.editInFlight) return;
-    this.editInFlight = true;
-
-    let text = "";
-
-    if (this.currentTool) {
-      text += `🔧 ${this.currentTool}\n`;
-    }
-
-    if (this.responseText.length > 0) {
-      const preview = this.responseText.slice(-3800);
-      text += preview;
-    } else {
-      const elapsed = Math.round((Date.now() - this.startTime) / 1000);
-      text += `⏳ Working (${elapsed}s)...`;
-    }
-
-    if (text === this.lastSentText) {
-      this.editInFlight = false;
+    // Serialize Telegram writes. If one is in flight, remember that an update
+    // was requested and fire a follow-up once it settles — so we never silently
+    // drop the latest state (especially trailing-timer edits that land mid-flight).
+    if (this.editInFlight) {
+      this.wantEdit = true;
       return;
     }
 
-    // Claim the window eagerly so concurrent throttledEdit() calls route
-    // through the trailing-timer path instead of racing us.
-    this.lastEditTime = Date.now();
-
-    try {
-      if (!this.msgId) {
-        const msg = await this.ctx.reply(text);
-        this.msgId = msg.message_id;
+    const run = async () => {
+      let text = "";
+      if (this.currentTool) text += `🔧 ${this.currentTool}\n`;
+      if (this.responseText.length > 0) {
+        text += this.responseText.slice(-3800);
       } else {
-        await this.ctx.api.editMessageText(this.ctx.chat!.id, this.msgId, text);
+        const elapsed = Math.round((Date.now() - this.startTime) / 1000);
+        text += `⏳ Working (${elapsed}s)...`;
       }
-      this.lastSentText = text;
+      if (text === this.lastSentText) return;
+
+      // Claim the window eagerly so concurrent throttledEdit() calls route
+      // through the trailing-timer path instead of racing us.
       this.lastEditTime = Date.now();
-    } catch {} finally {
-      this.editInFlight = false;
-    }
+
+      try {
+        if (!this.msgId) {
+          const msg = await this.ctx.reply(text);
+          this.msgId = msg.message_id;
+        } else {
+          await this.ctx.api.editMessageText(this.ctx.chat!.id, this.msgId, text);
+        }
+        this.lastSentText = text;
+        this.lastEditTime = Date.now();
+      } catch {}
+    };
+
+    this.wantEdit = false;
+    this.editInFlight = run().finally(() => {
+      this.editInFlight = null;
+      if (this.wantEdit && !this.finalized) {
+        this.wantEdit = false;
+        this.throttledEdit();
+      }
+    });
   }
 }
 

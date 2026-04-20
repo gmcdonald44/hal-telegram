@@ -111,13 +111,11 @@ export function stopActive(chatId: string | number): {
     `[STOP] ${ts} | chat=${chatId} | killed "${label}" after ${elapsed}ms | ${q.pending.length} remaining in queue`
   );
 
-  q.processing = false;
-  q.activeLabel = "";
-  q.activeStartedAt = 0;
-
-  if (q.pending.length > 0) {
-    processNext(String(chatId));
-  }
+  // Don't clear `processing` or call `processNext` here. The old item.execute()
+  // is still unwinding (spawn resolves after SIGTERM, handler replies, etc.);
+  // its `finally` block owns the transition and will kick off the next item.
+  // Starting here would break one-spawn-per-channel and clobber activeProcess
+  // when the old finally nulls it mid-new-run.
 
   return { stopped: true, label, elapsedMs: elapsed, queueRemaining: q.pending.length };
 }
