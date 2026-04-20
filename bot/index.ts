@@ -233,11 +233,17 @@ bot.on("message:text", async (ctx) => {
       }
 
       if (result.text) {
+        // Send whatever text we got — even partial output from a killed spawn
         const handled = await tracker.finalize(result.text);
         if (!handled) {
           await sendReply(ctx, result.text);
         } else if (result.text.length > 4000) {
           await sendReply(ctx, result.text.slice(4000));
+        }
+        // Crashes (not a user interrupt) should surface even when we have text
+        if (result.exitCode !== 0 && result.exitCode !== 143 && result.exitCode !== 137) {
+          console.error(`[ERROR] exit=${result.exitCode}, stderr=${result.stderr.slice(0, 200)}`);
+          await ctx.reply(`⚠️ Run exited with code ${result.exitCode} — output above may be incomplete.`);
         }
       } else {
         await tracker.cleanup();
@@ -344,6 +350,10 @@ bot.on("message:photo", async (ctx) => {
           await sendReply(ctx, result.text);
         } else if (result.text.length > 4000) {
           await sendReply(ctx, result.text.slice(4000));
+        }
+        if (result.exitCode !== 0 && result.exitCode !== 143 && result.exitCode !== 137) {
+          console.error(`[ERROR] exit=${result.exitCode}, stderr=${result.stderr.slice(0, 200)}`);
+          await ctx.reply(`⚠️ Run exited with code ${result.exitCode} — output above may be incomplete.`);
         }
       } else {
         await tracker.cleanup();
@@ -454,6 +464,10 @@ bot.on("message:document", async (ctx) => {
         } else if (result.text.length > 4000) {
           await sendReply(ctx, result.text.slice(4000));
         }
+        if (result.exitCode !== 0 && result.exitCode !== 143 && result.exitCode !== 137) {
+          console.error(`[ERROR] exit=${result.exitCode}, stderr=${result.stderr.slice(0, 200)}`);
+          await ctx.reply(`⚠️ Run exited with code ${result.exitCode} — output above may be incomplete.`);
+        }
       } else {
         await tracker.cleanup();
         if (result.exitCode !== 0 && result.exitCode !== 143 && result.exitCode !== 137) {
@@ -486,10 +500,8 @@ class ProgressTracker {
   private currentTool: string = "";
   private startTime: number = Date.now();
   private lastEditTime: number = 0;
-  private lastTextChangeTime: number = Date.now();
   private finalized: boolean = false;
   private initialTimer: ReturnType<typeof setTimeout> | null = null;
-  private staleTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(ctx: Context) {
     this.ctx = ctx;
@@ -499,7 +511,8 @@ class ProgressTracker {
   onOutput(fullText: string) {
     if (fullText !== this.responseText) {
       this.responseText = fullText;
-      this.lastTextChangeTime = Date.now();
+      // New assistant text means any prior tool call has finished — drop the label
+      this.currentTool = "";
       this.throttledEdit();
     }
   }
@@ -515,7 +528,7 @@ class ProgressTracker {
     }
   }
 
-  /** Start — initial message after 3s if no text yet, stale check every 10s */
+  /** Start — initial progress message appears at 3s if no text has arrived yet */
   start() {
     this.startTime = Date.now();
     this.initialTimer = setTimeout(() => {
@@ -523,21 +536,10 @@ class ProgressTracker {
         this.editMessage();
       }
     }, 3_000);
-    // Early finalize if text stops changing for 30s
-    this.staleTimer = setInterval(() => {
-      if (this.finalized) return;
-      if (this.responseText.length > 100) {
-        const staleMs = Date.now() - this.lastTextChangeTime;
-        if (staleMs > 30_000) {
-          this.finalize(this.responseText);
-        }
-      }
-    }, 10_000);
   }
 
   stop() {
     if (this.initialTimer) { clearTimeout(this.initialTimer); this.initialTimer = null; }
-    if (this.staleTimer) { clearInterval(this.staleTimer); this.staleTimer = null; }
   }
 
   /** Edit progress message into final response (tool line dropped = done signal) */
