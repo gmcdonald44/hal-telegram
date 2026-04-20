@@ -98,6 +98,9 @@ export function stopActive(chatId: string | number): {
 
   if (q.activeProcess) {
     try {
+      // Tag first so spawn.ts can distinguish a user /stop from other SIGTERM
+      // sources (node timeout, external kill) when the close event fires.
+      (q.activeProcess as ChildProcess & { __userStopped?: boolean }).__userStopped = true;
       q.activeProcess.kill("SIGTERM");
     } catch {}
     q.activeProcess = null;

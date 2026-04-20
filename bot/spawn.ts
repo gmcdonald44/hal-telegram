@@ -35,8 +35,10 @@ export interface SpawnResult {
   elapsedMs: number;
   ok: boolean;
   exitCode: number;
-  /** Termination signal if the process was killed (SIGTERM/SIGKILL from /stop); null otherwise */
+  /** Termination signal if the process was killed; null otherwise */
   signal: NodeJS.Signals | null;
+  /** True when queue.stopActive tagged this child before killing — i.e. user-initiated /stop */
+  interruptedByUser: boolean;
   stderr: string;
 }
 
@@ -145,6 +147,9 @@ export async function spawnClaude(
 
     child.on("close", (code, signal) => {
       const elapsed = Date.now() - start;
+      const interruptedByUser = Boolean(
+        (child as import("child_process").ChildProcess & { __userStopped?: boolean }).__userStopped
+      );
       resolve({
         text: responseText.trim(),
         sessionId: opts.sessionId,
@@ -152,6 +157,7 @@ export async function spawnClaude(
         ok: code === 0,
         exitCode: code ?? 1,
         signal: signal ?? null,
+        interruptedByUser,
         stderr: stderr.trim(),
       });
     });
@@ -165,6 +171,7 @@ export async function spawnClaude(
         ok: false,
         exitCode: 1,
         signal: null,
+        interruptedByUser: false,
         stderr: err.message,
       });
     });

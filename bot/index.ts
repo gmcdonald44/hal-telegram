@@ -241,13 +241,13 @@ bot.on("message:text", async (ctx) => {
           await sendReply(ctx, result.text.slice(4000));
         }
         // Crashes (not a user interrupt) should surface even when we have text
-        if (result.exitCode !== 0 && result.signal !== "SIGTERM" && result.signal !== "SIGKILL") {
+        if (result.exitCode !== 0 && !result.interruptedByUser) {
           console.error(`[ERROR] exit=${result.exitCode}, stderr=${result.stderr.slice(0, 200)}`);
           await ctx.reply(`⚠️ Run exited with code ${result.exitCode} — output above may be incomplete.`);
         }
       } else {
         await tracker.cleanup();
-        if (result.exitCode !== 0 && result.signal !== "SIGTERM" && result.signal !== "SIGKILL") {
+        if (result.exitCode !== 0 && !result.interruptedByUser) {
           console.error(`[ERROR] exit=${result.exitCode}, stderr=${result.stderr.slice(0, 200)}`);
           await ctx.reply("Hit an error. Check the logs.");
         }
@@ -351,13 +351,13 @@ bot.on("message:photo", async (ctx) => {
         } else if (result.text.length > 4000) {
           await sendReply(ctx, result.text.slice(4000));
         }
-        if (result.exitCode !== 0 && result.signal !== "SIGTERM" && result.signal !== "SIGKILL") {
+        if (result.exitCode !== 0 && !result.interruptedByUser) {
           console.error(`[ERROR] exit=${result.exitCode}, stderr=${result.stderr.slice(0, 200)}`);
           await ctx.reply(`⚠️ Run exited with code ${result.exitCode} — output above may be incomplete.`);
         }
       } else {
         await tracker.cleanup();
-        if (result.exitCode !== 0 && result.signal !== "SIGTERM" && result.signal !== "SIGKILL") {
+        if (result.exitCode !== 0 && !result.interruptedByUser) {
           console.error(`[ERROR] exit=${result.exitCode}, stderr=${result.stderr.slice(0, 200)}`);
           await ctx.reply("Hit an error processing the photo.");
         }
@@ -464,13 +464,13 @@ bot.on("message:document", async (ctx) => {
         } else if (result.text.length > 4000) {
           await sendReply(ctx, result.text.slice(4000));
         }
-        if (result.exitCode !== 0 && result.signal !== "SIGTERM" && result.signal !== "SIGKILL") {
+        if (result.exitCode !== 0 && !result.interruptedByUser) {
           console.error(`[ERROR] exit=${result.exitCode}, stderr=${result.stderr.slice(0, 200)}`);
           await ctx.reply(`⚠️ Run exited with code ${result.exitCode} — output above may be incomplete.`);
         }
       } else {
         await tracker.cleanup();
-        if (result.exitCode !== 0 && result.signal !== "SIGTERM" && result.signal !== "SIGKILL") {
+        if (result.exitCode !== 0 && !result.interruptedByUser) {
           console.error(`[ERROR] exit=${result.exitCode}, stderr=${result.stderr.slice(0, 200)}`);
           await ctx.reply("Hit an error processing the file.");
         }
@@ -501,6 +501,7 @@ class ProgressTracker {
   private startTime: number = Date.now();
   private lastEditTime: number = 0;
   private finalized: boolean = false;
+  private editInFlight: boolean = false;
   private initialTimer: ReturnType<typeof setTimeout> | null = null;
   private throttleTimer: ReturnType<typeof setTimeout> | null = null;
   private tickTimer: ReturnType<typeof setInterval> | null = null;
@@ -616,6 +617,11 @@ class ProgressTracker {
 
   private async editMessage() {
     if (this.finalized) return;
+    // Serialize Telegram writes. An in-flight edit may overlap with a new one
+    // if onOutput/onEvent fires while we're awaiting the API round-trip —
+    // bail and let the next throttledEdit (or a trailing timer) catch up.
+    if (this.editInFlight) return;
+    this.editInFlight = true;
 
     let text = "";
 
@@ -631,7 +637,14 @@ class ProgressTracker {
       text += `⏳ Working (${elapsed}s)...`;
     }
 
-    if (text === this.lastSentText) return;
+    if (text === this.lastSentText) {
+      this.editInFlight = false;
+      return;
+    }
+
+    // Claim the window eagerly so concurrent throttledEdit() calls route
+    // through the trailing-timer path instead of racing us.
+    this.lastEditTime = Date.now();
 
     try {
       if (!this.msgId) {
@@ -642,7 +655,9 @@ class ProgressTracker {
       }
       this.lastSentText = text;
       this.lastEditTime = Date.now();
-    } catch {}
+    } catch {} finally {
+      this.editInFlight = false;
+    }
   }
 }
 
