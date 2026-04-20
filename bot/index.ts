@@ -227,17 +227,24 @@ bot.on("message:text", async (ctx) => {
       );
 
       clearInterval(typingInterval);
-      await tracker.cleanup();
 
       if (!channel.sessionExists && result.ok) {
         markSessionCreated(chatId);
       }
 
-      if (result.ok && result.text) {
-        await sendReply(ctx, result.text);
-      } else if (result.exitCode !== 0 && result.exitCode !== 143 && result.exitCode !== 137) {
-        console.error(`[ERROR] exit=${result.exitCode}, stderr=${result.stderr.slice(0, 200)}`);
-        await ctx.reply("Hit an error. Check the logs.");
+      if (result.text) {
+        const handled = await tracker.finalize(result.text);
+        if (!handled) {
+          await sendReply(ctx, result.text);
+        } else if (result.text.length > 4000) {
+          await sendReply(ctx, result.text.slice(4000));
+        }
+      } else {
+        await tracker.cleanup();
+        if (result.exitCode !== 0 && result.exitCode !== 143 && result.exitCode !== 137) {
+          console.error(`[ERROR] exit=${result.exitCode}, stderr=${result.stderr.slice(0, 200)}`);
+          await ctx.reply("Hit an error. Check the logs.");
+        }
       }
 
       console.log(`[SPAWN] ${result.elapsedMs}ms | exit=${result.exitCode} | ${result.text.length} chars`);
@@ -326,17 +333,24 @@ bot.on("message:photo", async (ctx) => {
       );
 
       clearInterval(typingInterval);
-      await tracker.cleanup();
 
       if (!channel.sessionExists && result.ok) {
         markSessionCreated(chatId);
       }
 
-      if (result.ok && result.text) {
-        await sendReply(ctx, result.text);
-      } else if (result.exitCode !== 0 && result.exitCode !== 143 && result.exitCode !== 137) {
-        console.error(`[ERROR] exit=${result.exitCode}, stderr=${result.stderr.slice(0, 200)}`);
-        await ctx.reply("Hit an error processing the photo.");
+      if (result.text) {
+        const handled = await tracker.finalize(result.text);
+        if (!handled) {
+          await sendReply(ctx, result.text);
+        } else if (result.text.length > 4000) {
+          await sendReply(ctx, result.text.slice(4000));
+        }
+      } else {
+        await tracker.cleanup();
+        if (result.exitCode !== 0 && result.exitCode !== 143 && result.exitCode !== 137) {
+          console.error(`[ERROR] exit=${result.exitCode}, stderr=${result.stderr.slice(0, 200)}`);
+          await ctx.reply("Hit an error processing the photo.");
+        }
       }
 
       console.log(`[SPAWN] photo | ${result.elapsedMs}ms | exit=${result.exitCode}`);
@@ -428,17 +442,24 @@ bot.on("message:document", async (ctx) => {
       );
 
       clearInterval(typingInterval);
-      await tracker.cleanup();
 
       if (!channel.sessionExists && result.ok) {
         markSessionCreated(chatId);
       }
 
-      if (result.ok && result.text) {
-        await sendReply(ctx, result.text);
-      } else if (result.exitCode !== 0 && result.exitCode !== 143 && result.exitCode !== 137) {
-        console.error(`[ERROR] exit=${result.exitCode}, stderr=${result.stderr.slice(0, 200)}`);
-        await ctx.reply("Hit an error processing the file.");
+      if (result.text) {
+        const handled = await tracker.finalize(result.text);
+        if (!handled) {
+          await sendReply(ctx, result.text);
+        } else if (result.text.length > 4000) {
+          await sendReply(ctx, result.text.slice(4000));
+        }
+      } else {
+        await tracker.cleanup();
+        if (result.exitCode !== 0 && result.exitCode !== 143 && result.exitCode !== 137) {
+          console.error(`[ERROR] exit=${result.exitCode}, stderr=${result.stderr.slice(0, 200)}`);
+          await ctx.reply("Hit an error processing the file.");
+        }
       }
 
       console.log(`[SPAWN] doc ${fileName} | ${result.elapsedMs}ms | exit=${result.exitCode}`);
@@ -451,104 +472,154 @@ bot.on("message:document", async (ctx) => {
   });
 });
 
-// --- Progress tracker (single editable message for long spawns) ---
+// --- Progress tracker (single-message live streaming) ---
+// One message, text grows in real-time via throttled edits (~1s).
+// Tool line at top during work, drops on finalize = done signal.
 
 import type { StreamEvent } from "./spawn";
 
 class ProgressTracker {
   private ctx: Context;
-  private progressMsgId: number | null = null;
+  private msgId: number | null = null;
   private lastSentText: string = "";
-  private timer: ReturnType<typeof setInterval> | null = null;
   private responseText: string = "";
   private currentTool: string = "";
   private startTime: number = Date.now();
   private lastEditTime: number = 0;
-  private dirty: boolean = false;
+  private lastTextChangeTime: number = Date.now();
+  private finalized: boolean = false;
+  private initialTimer: ReturnType<typeof setTimeout> | null = null;
+  private staleTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(ctx: Context) {
     this.ctx = ctx;
   }
 
+  /** Call from onOutput — receives accumulated response text */
   onOutput(fullText: string) {
-    this.responseText = fullText;
-    this.dirty = true;
-  }
-
-  onEvent(event: StreamEvent) {
-    console.log(`[PROGRESS] event: ${event.type} tool=${event.toolName ?? ""}`);
-    if (event.type === "tool_start" && event.toolName) {
-      this.currentTool = event.toolName;
-      this.dirty = true;
-      const now = Date.now();
-      if (now - this.lastEditTime > 3_000) {
-        this.tick();
-      }
+    if (fullText !== this.responseText) {
+      this.responseText = fullText;
+      this.lastTextChangeTime = Date.now();
+      this.throttledEdit();
     }
   }
 
+  /** Call from onEvent — receives streaming events */
+  onEvent(event: StreamEvent) {
+    if (this.finalized) return;
+    if (event.type === "tool_start" && event.toolName) {
+      this.currentTool = event.toolName;
+      this.throttledEdit();
+    } else if (event.type === "text") {
+      // text accumulation handled by onOutput
+    }
+  }
+
+  /** Start — initial message after 3s if no text yet, stale check every 10s */
   start() {
     this.startTime = Date.now();
-    const initialDelay = setTimeout(() => {
-      this.tick();
-      this.timer = setInterval(() => this.tick(), 10_000);
-    }, 5_000);
-    this.timer = initialDelay as any;
+    this.initialTimer = setTimeout(() => {
+      if (!this.msgId && !this.finalized) {
+        this.editMessage();
+      }
+    }, 3_000);
+    // Early finalize if text stops changing for 30s
+    this.staleTimer = setInterval(() => {
+      if (this.finalized) return;
+      if (this.responseText.length > 100) {
+        const staleMs = Date.now() - this.lastTextChangeTime;
+        if (staleMs > 30_000) {
+          this.finalize(this.responseText);
+        }
+      }
+    }, 10_000);
   }
 
   stop() {
-    if (this.timer) {
-      clearInterval(this.timer);
-      clearTimeout(this.timer);
-      this.timer = null;
+    if (this.initialTimer) { clearTimeout(this.initialTimer); this.initialTimer = null; }
+    if (this.staleTimer) { clearInterval(this.staleTimer); this.staleTimer = null; }
+  }
+
+  /** Edit progress message into final response (tool line dropped = done signal) */
+  async finalize(text?: string): Promise<boolean> {
+    if (this.finalized && this.msgId === null) return false;
+    this.finalized = true;
+    this.stop();
+
+    const msgId = this.msgId;
+    if (msgId === null) return false;
+
+    if (text && text.trim()) {
+      try {
+        await this.ctx.api.editMessageText(
+          this.ctx.chat!.id, msgId,
+          text.slice(0, 4000),
+          { parse_mode: "Markdown" }
+        );
+        this.msgId = null;
+        return true;
+      } catch {
+        try {
+          await this.ctx.api.editMessageText(
+            this.ctx.chat!.id, msgId,
+            text.slice(0, 4000)
+          );
+          this.msgId = null;
+          return true;
+        } catch {}
+      }
     }
+
+    try { await this.ctx.api.deleteMessage(this.ctx.chat!.id, msgId); } catch {}
+    this.msgId = null;
+    return false;
   }
 
   async cleanup() {
     this.stop();
-    if (this.progressMsgId) {
-      try {
-        await this.ctx.api.deleteMessage(this.ctx.chat!.id, this.progressMsgId);
-      } catch {}
-      this.progressMsgId = null;
+    if (this.msgId) {
+      try { await this.ctx.api.deleteMessage(this.ctx.chat!.id, this.msgId); } catch {}
+      this.msgId = null;
     }
   }
 
-  private async tick() {
-    const elapsed = Math.round((Date.now() - this.startTime) / 1000);
+  /** Throttled edit — max once per second */
+  private throttledEdit() {
+    if (this.finalized) return;
+    const now = Date.now();
+    if (now - this.lastEditTime < 1_000) return;
+    this.editMessage();
+  }
 
-    let text = `⏳ Working (${elapsed}s)...`;
+  private async editMessage() {
+    if (this.finalized) return;
+
+    let text = "";
 
     if (this.currentTool) {
-      text += `\n🔧 ${this.currentTool}`;
+      text += `🔧 ${this.currentTool}\n`;
     }
 
-    const tail = this.responseText.slice(-300).trim();
-    if (tail.length > 0) {
-      const lines = tail.split("\n").slice(-4).join("\n");
-      text += `\n\n${lines}`;
+    if (this.responseText.length > 0) {
+      const preview = this.responseText.slice(-3800);
+      text += preview;
+    } else {
+      const elapsed = Math.round((Date.now() - this.startTime) / 1000);
+      text += `⏳ Working (${elapsed}s)...`;
     }
 
     if (text === this.lastSentText) return;
 
-    console.log(`[PROGRESS] tick: "${text.slice(0, 80)}..." msgId=${this.progressMsgId}`);
     try {
-      if (!this.progressMsgId) {
+      if (!this.msgId) {
         const msg = await this.ctx.reply(text);
-        this.progressMsgId = msg.message_id;
+        this.msgId = msg.message_id;
       } else {
-        await this.ctx.api.editMessageText(
-          this.ctx.chat!.id,
-          this.progressMsgId,
-          text
-        );
+        await this.ctx.api.editMessageText(this.ctx.chat!.id, this.msgId, text);
       }
       this.lastSentText = text;
       this.lastEditTime = Date.now();
-      this.dirty = false;
-    } catch (e: any) {
-      console.error(`[PROGRESS] tick error: ${e?.message ?? e}`);
-    }
+    } catch {}
   }
 }
 
