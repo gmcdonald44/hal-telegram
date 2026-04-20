@@ -600,7 +600,15 @@ class ProgressTracker {
   }
 
   async cleanup() {
+    // Mirror finalize's front-end: mark finalized first so no new edits queue,
+    // drain the in-flight write so it can't resurrect msgId after we null it
+    // or re-arm a trailing edit via wantEdit.
+    this.finalized = true;
+    this.wantEdit = false;
     this.stop();
+    if (this.editInFlight) {
+      try { await this.editInFlight; } catch {}
+    }
     if (this.msgId) {
       try { await this.ctx.api.deleteMessage(this.ctx.chat!.id, this.msgId); } catch {}
       this.msgId = null;

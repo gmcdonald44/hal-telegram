@@ -97,11 +97,19 @@ export function stopActive(chatId: string | number): {
   const elapsed = Date.now() - q.activeStartedAt;
 
   if (q.activeProcess) {
+    const proc = q.activeProcess;
     try {
       // Tag first so spawn.ts can distinguish a user /stop from other SIGTERM
       // sources (node timeout, external kill) when the close event fires.
-      (q.activeProcess as ChildProcess & { __userStopped?: boolean }).__userStopped = true;
-      q.activeProcess.kill("SIGTERM");
+      (proc as ChildProcess & { __userStopped?: boolean }).__userStopped = true;
+      proc.kill("SIGTERM");
+      // Escalate to SIGKILL if the child is still alive after 2s — prevents
+      // a SIGTERM-resistant spawn from wedging the channel.
+      setTimeout(() => {
+        if (proc.exitCode === null && proc.signalCode === null) {
+          try { proc.kill("SIGKILL"); } catch {}
+        }
+      }, 2_000).unref?.();
     } catch {}
     q.activeProcess = null;
   }
