@@ -40,7 +40,7 @@ Four files:
 
 The magic is `--resume` — every message to a given chat re-enters the same Claude Code session, so it remembers what you've been working on.
 
-Progress ticker edits a single Telegram message every 10s with the current tool + response tail so you see it doing work during long runs. `/stop` kills the spawn.
+A single Telegram message streams the response live (throttled ~1s), with a `🔧 <tool>` line during tool calls so you see it doing work during long runs. `/stop` kills the spawn.
 
 Single-owner mode by default. MIT licensed. PRs welcome but the scope stays narrow.
 

@@ -42,7 +42,8 @@ It is explicitly **not** a framework. Four TypeScript files, no database, no web
 | Documents | Same — Claude gets the path, MIME type, size |
 | Replies | Original message context prepended (`[Replying to X: "..."]`) |
 | Long responses | Split at 4 KB, sent as multiple Telegram messages |
-| Progress ticker | Single editable message updates every 10 s with current tool + response tail |
+| Progress updates | Single editable message streams the response live (throttled ~1s); shows `🔧 <tool>` during tool calls and drops on completion |
+| Abnormal exit | Sends `⚠️ Run exited with code <N>` if `claude -p` crashes so partial output isn't silently "done" |
 | `/stop` | SIGTERMs the running `claude -p` spawn |
 | `/stop all` | SIGTERM + clear the rest of the queue |
 | `/queue` or `/status` | Show what's running and what's pending |
@@ -70,8 +71,8 @@ Telegram  ──getUpdates──▶  bot/index.ts  ──enqueue──▶  bot/q
                                │                    bot/spawn.ts
                                │                          │
                                ▼                          ▼
-                         edit progress msg   ┌──▶  claude -p --resume <session-id>
-                         every 10s           │              │
+                         stream progress     ┌──▶  claude -p --resume <session-id>
+                         (throttled ~1s)     │              │
                                ▲             │              ▼
                                └── stream-json events ──────┘
                                          │
